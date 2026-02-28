@@ -1,0 +1,6 @@
+title: "Hydra Platform"
+description: "Hydra Platform: TCG marketplace specs"
+theme: minima
+include:
+  - docs
+  - README.md
