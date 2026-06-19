@@ -7,9 +7,14 @@ import {
   getStats,
   searchCards,
   filterByRarity,
+  getAdvancedAnalytics,
+  canCatalogCards,
+  assertCanCatalogCards,
 } from "../src/portfolio";
 import { createCard } from "../src/card";
 import type { Card, CardVariant } from "../src/card";
+import { createFreeSubscription } from "../src/subscription";
+import type { SubscriptionState } from "../src/subscription";
 
 function makeCard(overrides: Partial<Parameters<typeof createCard>[0]> = {}): Card {
   return createCard({
@@ -166,5 +171,92 @@ describe("filterByRarity", () => {
     expect(filterByRarity(p, "rare")).toHaveLength(2);
     expect(filterByRarity(p, "common")).toHaveLength(1);
     expect(filterByRarity(p, "mythic")).toHaveLength(0);
+  });
+});
+
+describe("getAdvancedAnalytics", () => {
+  const activePro = (user_id: string): SubscriptionState => ({
+    user_id,
+    tier: "pro",
+    status: "active",
+    current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    cancel_at_period_end: false,
+    updated_at: new Date(),
+  });
+
+  it("should require a Pro entitlement", () => {
+    const p = createPortfolio("user-1");
+    addCard(p, makeCard(), 1, 80);
+
+    expect(() => getAdvancedAnalytics(p, createFreeSubscription("user-1"))).toThrow(
+      "Hydra Pro is required"
+    );
+  });
+
+  it("should calculate Pro-only analytics", () => {
+    const p = createPortfolio("user-1");
+    addCard(p, makeCard({ card_id: "c1", name: "Black Lotus" }), 2, 70);
+    addCard(
+      p,
+      makeCard({
+        card_id: "c2",
+        name: "Sol Ring",
+        variants: [
+          { variant_id: "v1", label: "Standard", finish: "standard" as const, market_price: 50 },
+        ],
+      }),
+      1,
+      60
+    );
+
+    const analytics = getAdvancedAnalytics(p, activePro("user-1"));
+
+    expect(analytics.total_cards).toBe(3);
+    expect(analytics.total_value).toBe(225);
+    expect(analytics.total_cost_basis).toBe(200);
+    expect(analytics.unrealized_pnl).toBe(25);
+    expect(analytics.unrealized_pnl_percentage).toBe(12.5);
+    expect(analytics.largest_position?.card_name).toBe("Black Lotus");
+    expect(analytics.positions[0].weight_percentage).toBe(80);
+  });
+});
+
+describe("cataloging gates", () => {
+  it("should allow free users under the cataloging limit", () => {
+    const p = createPortfolio("user-1");
+
+    const decision = canCatalogCards(p, createFreeSubscription("user-1"), 25);
+
+    expect(decision.allowed).toBe(true);
+    expect(decision.requires_pro).toBe(false);
+    expect(decision.max_cards).toBe(100);
+  });
+
+  it("should require Pro when free users exceed the cataloging limit", () => {
+    const p = createPortfolio("user-1");
+    addCard(p, makeCard(), 100);
+
+    const decision = canCatalogCards(p, createFreeSubscription("user-1"), 1);
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.requires_pro).toBe(true);
+    expect(() => assertCanCatalogCards(p, createFreeSubscription("user-1"), 1)).toThrow(
+      "Hydra Pro is required"
+    );
+  });
+
+  it("should allow active Pro users unlimited cataloging", () => {
+    const p = createPortfolio("user-1");
+    addCard(p, makeCard(), 100);
+    const subscription: SubscriptionState = {
+      user_id: "user-1",
+      tier: "pro",
+      status: "active",
+      cancel_at_period_end: false,
+      updated_at: new Date(),
+    };
+
+    expect(canCatalogCards(p, subscription, 1000).allowed).toBe(true);
+    expect(() => assertCanCatalogCards(p, subscription, 1000)).not.toThrow();
   });
 });
