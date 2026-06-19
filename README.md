@@ -200,6 +200,12 @@ docker compose ps
 # Required
 TCGPLAYER_API_KEY=           # TCGPlayer v2 API bearer token
 STRIPE_SECRET_KEY=           # Stripe payment processing
+STRIPE_WEBHOOK_SECRET=       # Stripe webhook signature verification
+STRIPE_PRICE_PRO_MONTHLY=    # Stripe Price ID for Hydra Pro monthly
+STRIPE_PRICE_PRO_YEARLY=     # Stripe Price ID for Hydra Pro yearly
+STRIPE_PRICE_PROXY_PRINT_CREDIT=      # Stripe Price ID for proxy print IAP
+STRIPE_PRICE_AVATAR_SKIN=             # Stripe Price ID for avatar skin IAP
+STRIPE_PRICE_GUILD_BANNER=            # Stripe Price ID for guild banner IAP
 DATABASE_URL=                # PostgreSQL connection string
 REDIS_URL=                   # Redis connection string
 
@@ -236,6 +242,11 @@ GET    /api/v1/game/leagues          # Current league standings
 POST   /api/v1/genai/fuse            # Concept fusion card generation
 POST   /api/v1/genai/input-scan      # Monster Rancher-style input
 POST   /api/v1/genai/proxy-print     # Generate print-ready PDF
+
+POST   /api/v1/billing/checkout/pro  # Create Stripe Checkout for Hydra Pro
+POST   /api/v1/billing/checkout/iap  # Create Stripe Checkout for one-time purchases
+POST   /api/v1/billing/webhook       # Apply Stripe subscription/purchase events
+GET    /api/v1/billing/entitlements  # Current tier, limits, and feature gates
 ```
 
 ### Data Tier Selection
@@ -247,6 +258,47 @@ The Market Interface operates on a tiered data model to balance cost, latency, a
 | Free | TCGPlayer (cached), Scryfall | 15-minute delay | Casual browsing, collection tracking |
 | Standard | TCGPlayer (live) + eBay completed | Real-time + 5-min batches | Active trading, portfolio management |
 | Professional | All sources + Card Kingdom buylist + LGS aggregation | Real-time streaming | Arbitrage, market making, creator analytics |
+
+### Billing and Feature Gates
+
+Hydra Pro gates advanced portfolio analytics, unlimited cataloging, bulk import, and unlimited alerts. Free users keep basic portfolio valuation and can catalog up to 100 cards. The TypeScript scaffold exposes entitlement checks plus Stripe Checkout request builders; API routes supply live Stripe clients and Price IDs from environment variables.
+
+```typescript
+import {
+  createProCheckoutSession,
+  createInAppPurchaseCheckoutSession,
+  subscriptionFromStripeSnapshot,
+  inAppPurchaseReceiptFromCheckoutSession,
+} from 'card-trade-social';
+
+// POST /api/v1/billing/checkout/pro
+const checkoutParams = createProCheckoutSession({
+  user_id: user.id,
+  price_id: process.env.STRIPE_PRICE_PRO_MONTHLY!,
+  billing_interval: 'month',
+  success_url: 'https://hydra.gg/billing/success',
+  cancel_url: 'https://hydra.gg/billing/cancel',
+  stripe_customer_id: user.stripe_customer_id,
+});
+const session = await stripe.checkout.sessions.create(checkoutParams);
+
+// POST /api/v1/billing/checkout/iap
+const purchaseParams = createInAppPurchaseCheckoutSession({
+  user_id: user.id,
+  product_id: 'proxy_print_credit',
+  price_id: process.env.STRIPE_PRICE_PROXY_PRINT_CREDIT!,
+  quantity: 1,
+  success_url: 'https://hydra.gg/purchase/success',
+  cancel_url: 'https://hydra.gg/purchase/cancel',
+});
+
+// POST /api/v1/billing/webhook
+const subscriptionState = subscriptionFromStripeSnapshot(user.id, stripeSubscription, [
+  process.env.STRIPE_PRICE_PRO_MONTHLY!,
+  process.env.STRIPE_PRICE_PRO_YEARLY!,
+]);
+const purchaseReceipt = inAppPurchaseReceiptFromCheckoutSession(stripeCheckoutSession);
+```
 
 ---
 
