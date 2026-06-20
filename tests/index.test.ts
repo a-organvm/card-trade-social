@@ -19,5 +19,8 @@ describe("card-trade-social", () => {
     expect(api.createProposal).toBeDefined();
     expect(api.calculateHydraPrice).toBeDefined();
     expect(api.createProCheckoutSession).toBeDefined();
+    expect(api.issueApiKey).toBeDefined();
+    expect(api.authorizeEndpoint).toBeDefined();
+    expect(api.addAuthenticatedPortfolioCard).toBeDefined();
   });
 });
