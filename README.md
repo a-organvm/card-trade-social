@@ -198,6 +198,8 @@ docker compose ps
 
 ```bash
 # Required
+HYDRA_API_KEY_SECRET=        # 32+ char server-side secret for HMAC API-key hashes
+HYDRA_AUTH_ISSUER=card-trade-social  # Optional issuer label for issued keys
 TCGPLAYER_API_KEY=           # TCGPlayer v2 API bearer token
 STRIPE_SECRET_KEY=           # Stripe payment processing
 STRIPE_WEBHOOK_SECRET=       # Stripe webhook signature verification
@@ -253,6 +255,52 @@ POST   /api/v1/billing/checkout/iap  # Create Stripe Checkout for one-time purch
 POST   /api/v1/billing/webhook       # Apply Stripe subscription/purchase events
 GET    /api/v1/billing/entitlements  # Current tier, limits, and feature gates
 ```
+
+### Auth and API Keys
+
+All primary HTTP and WebSocket endpoints should be guarded by API-key auth before calling domain handlers. The secret path is `HYDRA_API_KEY_SECRET`, loaded from the process environment or a deployment secret manager. Use a random value with at least 32 characters and never commit it. `HYDRA_AUTH_ISSUER` is optional and defaults to `card-trade-social`.
+
+API keys are displayed once at issuance. Persist only the returned `credential` record; it contains an HMAC-SHA256 hash, key id, user id, scopes, status, and optional expiry.
+
+```typescript
+import {
+  authorizeEndpoint,
+  createAuthConfigFromEnv,
+  issueApiKey,
+  addAuthenticatedPortfolioCard,
+} from 'card-trade-social';
+
+const authConfig = createAuthConfigFromEnv(process.env);
+
+// Operator/admin flow: issue a scoped key and persist only credential.
+const { api_key, credential } = await issueApiKey({
+  user_id: 'user-123',
+  config: authConfig,
+  scopes: ['portfolio:read', 'portfolio:write', 'trades:write'],
+  name: 'mobile app key',
+});
+await apiKeyRepository.save(credential);
+
+// Request flow: load credential by key id, authorize endpoint scope, then call
+// authenticated domain wrappers to enforce user ownership.
+const authorization = await authorizeEndpoint({
+  method: 'POST',
+  path: '/api/v1/portfolio/holdings',
+  headers: request.headers,
+  credentials: await apiKeyRepository.allActive(),
+  config: authConfig,
+});
+
+addAuthenticatedPortfolioCard(
+  authorization.auth,
+  portfolio,
+  card,
+  request.body.quantity,
+  request.body.purchase_price
+);
+```
+
+Supported request credentials are `Authorization: Bearer <api_key>`, `Authorization: ApiKey <api_key>`, `X-Hydra-Api-Key`, and `X-Api-Key`. Endpoint scopes are defined in `PRIMARY_ENDPOINT_AUTH_RULES`; implemented portfolio, trade, pricing, and billing operations also expose authenticated wrappers for ownership and actor checks.
 
 ### Data Tier Selection
 
